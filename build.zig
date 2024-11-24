@@ -4,28 +4,24 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
-        .name = "zsqlite-migrate",
+    const zsqlite_migrate_mod = b.addModule("zsqlite-migrate", .{
         .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
     });
 
     // Add SQLite C as a static library.
     const zsqlite_c = b.dependency("zsqlite-c", .{ .target = target, .optimize = optimize });
     const zsqlite_c_artifact = zsqlite_c.artifact("zsqlite-c");
-    lib.linkLibrary(zsqlite_c_artifact);
+    zsqlite_migrate_mod.linkLibrary(zsqlite_c_artifact);
 
-    b.installArtifact(lib);
-
-    const lib_unit_tests = b.addTest(.{
+    const zsqlite_migrate_mod_test = b.addTest(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    zsqlite_migrate_mod_test.linkLibrary(zsqlite_c_artifact);
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const run_zsqlite_migrate_mod_test = b.addRunArtifact(zsqlite_migrate_mod_test);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    test_step.dependOn(&run_zsqlite_migrate_mod_test.step);
 }
