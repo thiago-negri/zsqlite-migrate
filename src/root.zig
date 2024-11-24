@@ -19,10 +19,8 @@ pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.All
     if (!exists) {
         try zMigrateTableCreate(sqlite3);
     } else {
-        std.debug.print("else", .{});
         stmt_read = try zMigratePrepareRead(sqlite3);
         filename_sql = try zMigrateStep(stmt_read.?);
-        std.debug.print("={s}=\n", .{filename_sql.?});
     }
 
     var dir = try std.fs.cwd().openDir(rootPath, .{ .iterate = true });
@@ -34,8 +32,6 @@ pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.All
             continue;
         }
         const filename_dir = file.name;
-
-        std.debug.print("{s}=={s}\n", .{ filename_dir, filename_sql.? });
 
         var ord = order(filename_dir, filename_sql);
         while (ord == .gt) : (ord = order(filename_dir, filename_sql)) {
@@ -87,9 +83,8 @@ fn zMigrateStep(stmt: *c.sqlite3_stmt) Error!?[]const u8 {
             return null;
         },
         c.SQLITE_ROW => {
-            std.debug.print("row\n", .{});
             const data_ptr = c.sqlite3_column_text(stmt, 0);
-            const size = @as(usize, @intCast(c.sqlite3_column_bytes(stmt, 1)));
+            const size = @as(usize, @intCast(c.sqlite3_column_bytes(stmt, 0)));
             return data_ptr[0..size];
         },
         else => {
@@ -100,6 +95,7 @@ fn zMigrateStep(stmt: *c.sqlite3_stmt) Error!?[]const u8 {
 
 fn order(dir: []const u8, opt_sql: ?[]const u8) std.math.Order {
     if (opt_sql) |sql| {
+        std.debug.print("comparing {s} with {s}\n", .{ dir, sql });
         return std.mem.order(u8, dir, sql);
     } else {
         return .lt;
@@ -225,6 +221,7 @@ test "test" {
         _ = c.sqlite3_reset(stmt);
         try zMigrateInsert(stmt, "3_three.sql");
         _ = c.sqlite3_reset(stmt);
+        try zMigrateInsert(stmt, "7_seven.sql");
     }
     try migrate(sqlite3.?, "./tests/migrations", std.testing.allocator);
 }
