@@ -1,2 +1,2 @@
-five;
+CREATE TABLE five (five TEXT)
 

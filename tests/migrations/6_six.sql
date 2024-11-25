@@ -1,1 +1,2 @@
-six;
+CREATE TABLE six (six TEXT)
+

@@ -1,2 +1,2 @@
-two;
+CREATE TABLE two (two TEXT)
 

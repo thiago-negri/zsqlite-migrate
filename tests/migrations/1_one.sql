@@ -1,2 +1,2 @@
-one;
+CREATE TABLE one (one TEXT)
 
