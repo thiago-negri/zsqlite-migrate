@@ -4,13 +4,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const check_migration_files = b.option(bool, "check_migration_files", "Whether we do runtime checks for migration files that contains more than one statement, defaults to true") orelse true;
+
+    const options = b.addOptions();
+    options.addOption(bool, "check_migration_files", check_migration_files);
+
+    const zsqlite_c = b.dependency("zsqlite-c", .{ .target = target, .optimize = optimize });
+    const zsqlite_c_artifact = zsqlite_c.artifact("zsqlite-c");
+
     const zsqlite_migrate_mod = b.addModule("zsqlite-migrate", .{
         .root_source_file = b.path("src/root.zig"),
     });
-
-    // Add SQLite C as a static library.
-    const zsqlite_c = b.dependency("zsqlite-c", .{ .target = target, .optimize = optimize });
-    const zsqlite_c_artifact = zsqlite_c.artifact("zsqlite-c");
+    zsqlite_migrate_mod.addOptions("config", options);
     zsqlite_migrate_mod.linkLibrary(zsqlite_c_artifact);
 
     const zsqlite_migrate_mod_test = b.addTest(.{
@@ -19,6 +24,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     zsqlite_migrate_mod_test.linkLibrary(zsqlite_c_artifact);
+    zsqlite_migrate_mod_test.root_module.addImport("config", options.createModule());
 
     const run_zsqlite_migrate_mod_test = b.addRunArtifact(zsqlite_migrate_mod_test);
 

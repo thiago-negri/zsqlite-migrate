@@ -2,12 +2,16 @@ const std = @import("std");
 const c = @cImport({
     @cInclude("sqlite3.h");
 });
+const config = @import("config");
 
+/// Apply migrations from `rootPath` into `sqlite3`.
+/// `allocator` is used to allocate memory for each file read.
 pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.Allocator) !void {
     var stmt_read: ?*c.sqlite3_stmt = null;
     defer if (stmt_read) |ptr| {
         _ = c.sqlite3_finalize(ptr);
     };
+
     var stmt_insert: ?*c.sqlite3_stmt = null;
     defer if (stmt_insert) |ptr| {
         _ = c.sqlite3_finalize(ptr);
@@ -31,19 +35,32 @@ pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.All
         if (file.kind != .file) {
             continue;
         }
+
         const filename_dir = file.name;
 
+        // Advance z_migrate cursor until we are exactly at this file or past it.
+        // Accounts for SQLite database having extra migrations that we don't have in file system.
         var ord = order(filename_dir, filename_sql);
         while (ord == .gt) : (ord = order(filename_dir, filename_sql)) {
             filename_sql = try zMigrateStep(stmt_read.?);
         }
 
+        // If current filename is less than the current one in z_migrate, it means it has not been
+        // applied yet, so apply it.
         if (ord == .lt) {
             const stat = try dir.statFile(filename_dir);
             const size = stat.size + 1; // +1 for sentinel
-            const content = try dir.readFileAllocOptions(allocator, filename_dir, size, size, @alignOf(u8), 0);
-            defer allocator.free(content);
-            try zMigrateApply(sqlite3, content);
+
+            {
+                const content = try dir.readFileAllocOptions(allocator, filename_dir, size, size, @alignOf(u8), 0);
+                defer allocator.free(content);
+                if (config.check_migration_files) {
+                    try zMigrateApplyCheck(sqlite3, content);
+                } else {
+                    try zMigrateApply(sqlite3, content);
+                }
+            }
+
             if (stmt_insert == null) {
                 stmt_insert = try zMigratePrepareInsert(sqlite3);
             } else {
@@ -52,12 +69,31 @@ pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.All
                     return Error.Sqlite;
                 }
             }
+
             try zMigrateInsert(stmt_insert.?, filename_dir);
         }
     }
 }
 
+/// Apply a migration
 fn zMigrateApply(sqlite3: *c.sqlite3, sql: [:0]const u8) Error!void {
+    var stmt: ?*c.sqlite3_stmt = null;
+    const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, null);
+    if (err != c.SQLITE_OK) {
+        if (stmt) |ptr| {
+            _ = c.sqlite3_finalize(ptr);
+        }
+        return Error.Sqlite;
+    }
+    defer _ = c.sqlite3_finalize(stmt);
+    const step = c.sqlite3_step(stmt);
+    if (step != c.SQLITE_DONE) {
+        return Error.Sqlite;
+    }
+}
+
+/// Apply a migration and check if it was a single statement
+fn zMigrateApplyCheck(sqlite3: *c.sqlite3, sql: [:0]const u8) Error!void {
     var stmt: ?*c.sqlite3_stmt = null;
     var tail: ?[*:0]const u8 = null;
     const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, &tail);
@@ -68,6 +104,7 @@ fn zMigrateApply(sqlite3: *c.sqlite3, sql: [:0]const u8) Error!void {
         return Error.Sqlite;
     }
     defer _ = c.sqlite3_finalize(stmt);
+    // Check whether that was a single statement or not
     if (tail) |ptr| {
         if (ptr[0] != 0) {
             return Error.MigrationMustBeSingleStatement;
@@ -151,13 +188,8 @@ fn zMigrateInsert(stmt: *c.sqlite3_stmt, filename_dir: []const u8) Error!void {
         return Error.Sqlite;
     }
     const step = c.sqlite3_step(stmt);
-    switch (step) {
-        c.SQLITE_DONE => {
-            return;
-        },
-        else => {
-            return Error.Sqlite;
-        },
+    if (step != c.SQLITE_DONE) {
+        return Error.Sqlite;
     }
 }
 
@@ -204,13 +236,8 @@ fn zMigrateTableCreate(sqlite3: *c.sqlite3) Error!void {
     }
     defer _ = c.sqlite3_finalize(stmt);
     const step = c.sqlite3_step(stmt);
-    switch (step) {
-        c.SQLITE_DONE => {
-            return;
-        },
-        else => {
-            return Error.Sqlite;
-        },
+    if (step != c.SQLITE_DONE) {
+        return Error.Sqlite;
     }
 }
 
