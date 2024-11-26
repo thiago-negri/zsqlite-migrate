@@ -42,3 +42,5 @@ try migrate(db, path, allocator);    // execute migrations
 - Allocator is only used to read each file into memory, one file at a time.
   Free is called as soon after that file is executed.
 - Each migration file must consist of a single SQL statement, without the ending `;`.
+    - You can disable that check with `-Dcheck_migration_files=false`, but it will still only
+      execute the first statement of each file.
