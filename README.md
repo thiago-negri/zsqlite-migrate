@@ -35,6 +35,8 @@ const db: *c.sqlite3 = ...;          // your SQLite connection
 try migrate(db);                     // execute migrations
 ```
 
+See [zsqlite-demo](https://github.com/thiago-negri/zsqlite-demo) for an example on how to use on a "full" project.
+
 ## Notes
 
 - All files in `migration_root_path` will be loaded at compile time and will be embedded at your executable.
