@@ -4,9 +4,8 @@ const c = @cImport({
 });
 const config = @import("config");
 
-/// Apply migrations from `rootPath` into `sqlite3`.
-/// `allocator` is used to allocate memory for each file read.
-pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.Allocator) !void {
+/// Apply migrations
+pub fn migrate(sqlite3: *c.sqlite3) !void {
     var stmt_read: ?*c.sqlite3_stmt = null;
     defer if (stmt_read) |ptr| {
         _ = c.sqlite3_finalize(ptr);
@@ -27,16 +26,9 @@ pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.All
         filename_sql = try zMigrateStep(stmt_read.?);
     }
 
-    var dir = try std.fs.cwd().openDir(rootPath, .{ .iterate = true });
-    defer dir.close();
-
-    var iter = dir.iterate();
-    while (try iter.next()) |file| {
-        if (file.kind != .file) {
-            continue;
-        }
-
-        const filename_dir = file.name;
+    const migrations = comptime getMigrations();
+    for (migrations) |migration| {
+        const filename_dir = migration.filename;
 
         // Advance z_migrate cursor until we are exactly at this file or past it.
         // Accounts for SQLite database having extra migrations that we don't have in file system.
@@ -48,17 +40,11 @@ pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.All
         // If current filename is less than the current one in z_migrate, it means it has not been
         // applied yet, so apply it.
         if (ord == .lt) {
-            const stat = try dir.statFile(filename_dir);
-            const size = stat.size + 1; // +1 for sentinel
-
-            {
-                const content = try dir.readFileAllocOptions(allocator, filename_dir, size, size, @alignOf(u8), 0);
-                defer allocator.free(content);
-                if (config.check_migration_files) {
-                    try zMigrateApplyCheck(sqlite3, content);
-                } else {
-                    try zMigrateApply(sqlite3, content);
-                }
+            const content = migration.sql;
+            if (config.check_files) {
+                try zMigrateApplyCheck(sqlite3, content);
+            } else {
+                try zMigrateApply(sqlite3, content);
             }
 
             if (stmt_insert == null) {
@@ -73,6 +59,18 @@ pub fn migrate(sqlite3: *c.sqlite3, rootPath: []const u8, allocator: std.mem.All
             try zMigrateInsert(stmt_insert.?, filename_dir);
         }
     }
+}
+
+const Migration = struct { filename: []const u8, sql: [:0]const u8 };
+
+const MIGRATIONS_LEN = config.migration_filenames.len;
+fn getMigrations() [MIGRATIONS_LEN]Migration {
+    var migrations: [MIGRATIONS_LEN]Migration = undefined;
+    inline for (config.migration_filenames, 0..) |file, index| {
+        migrations[index].filename = file;
+        migrations[index].sql = config.migration_sqls[index];
+    }
+    return migrations;
 }
 
 /// Apply a migration
@@ -263,7 +261,7 @@ test "test" {
         _ = c.sqlite3_reset(stmt);
         try zMigrateInsert(stmt, "7_seven.sql");
     }
-    try migrate(sqlite3.?, "./tests/migrations", std.testing.allocator);
+    try migrate(sqlite3.?);
     {
         const sql: [:0]const u8 =
             \\SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name

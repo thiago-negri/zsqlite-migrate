@@ -1,13 +1,43 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const check_migration_files = b.option(bool, "check_migration_files", "Whether we do runtime checks for migration files that contains more than one statement, defaults to true") orelse true;
+    const check_files_desc =
+        \\Whether we do runtime checks for migration files that contains more than one statement, defaults to true
+    ;
+    const check_files = b.option(bool, "zmig_check_files", check_files_desc) orelse true;
+
+    const migration_root_path_desc =
+        \\The root path where all the migration SQL files are
+    ;
+    const migration_root_path = b.option([]const u8, "migration_root_path", migration_root_path_desc);
+
+    var files = std.ArrayList([]const u8).init(b.allocator);
+    defer files.deinit();
+    var sqls = std.ArrayList([:0]const u8).init(b.allocator);
+    defer sqls.deinit();
+    if (migration_root_path) |path| {
+        var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+        defer dir.close();
+        var iter = dir.iterate();
+        while (try iter.next()) |file| {
+            if (file.kind != .file) {
+                continue;
+            }
+            try files.append(b.dupe(file.name));
+            const stat = try dir.statFile(file.name);
+            const size = stat.size + 1; // +1 for sentinel
+            const sql = try dir.readFileAllocOptions(b.allocator, file.name, size, size, @alignOf(u8), 0);
+            try sqls.append(sql);
+        }
+    }
 
     const options = b.addOptions();
-    options.addOption(bool, "check_migration_files", check_migration_files);
+    options.addOption(bool, "check_files", check_files);
+    options.addOption([]const []const u8, "migration_filenames", files.items);
+    options.addOption([]const [:0]const u8, "migration_sqls", sqls.items);
 
     const zsqlite_c = b.dependency("zsqlite-c", .{ .target = target, .optimize = optimize });
     const zsqlite_c_artifact = zsqlite_c.artifact("zsqlite-c");
