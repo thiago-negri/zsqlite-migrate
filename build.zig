@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) !void {
     ;
     const migration_root_path = b.option([]const u8, "migration_root_path", migration_root_path_desc);
 
+    // Load migration files into a config module
     var files = std.ArrayList([]const u8).init(b.allocator);
     defer files.deinit();
     var sqls = std.ArrayList([:0]const u8).init(b.allocator);

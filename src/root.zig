@@ -26,10 +26,7 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
         filename_sql = try zMigrateStep(stmt_read.?);
     }
 
-    const migrations = comptime getMigrations();
-    for (migrations) |migration| {
-        const filename_dir = migration.filename;
-
+    for (config.migration_filenames, 0..) |filename_dir, migration_index| {
         // Advance z_migrate cursor until we are exactly at this file or past it.
         // Accounts for SQLite database having extra migrations that we don't have in file system.
         var ord = order(filename_dir, filename_sql);
@@ -40,7 +37,7 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
         // If current filename is less than the current one in z_migrate, it means it has not been
         // applied yet, so apply it.
         if (ord == .lt) {
-            const content = migration.sql;
+            const content = config.migration_sqls[migration_index];
             if (config.emit_debug) {
                 std.debug.print("SQLite Migrate: Applying {s}...\n", .{filename_dir});
             }
@@ -65,16 +62,6 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
 }
 
 const Migration = struct { filename: []const u8, sql: [:0]const u8 };
-
-const MIGRATIONS_LEN = config.migration_filenames.len;
-fn getMigrations() [MIGRATIONS_LEN]Migration {
-    var migrations: [MIGRATIONS_LEN]Migration = undefined;
-    inline for (config.migration_filenames, 0..) |file, index| {
-        migrations[index].filename = file;
-        migrations[index].sql = config.migration_sqls[index];
-    }
-    return migrations;
-}
 
 /// Apply a migration
 fn zMigrateApply(sqlite3: *c.sqlite3, sql: [:0]const u8) Error!void {
