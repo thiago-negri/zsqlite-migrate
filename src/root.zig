@@ -41,6 +41,9 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
         // applied yet, so apply it.
         if (ord == .lt) {
             const content = migration.sql;
+            if (config.emit_debug) {
+                std.debug.print("SQLite Migrate: Applying {s}...\n", .{filename_dir});
+            }
             if (config.check_files) {
                 try zMigrateApplyCheck(sqlite3, content);
             } else {

@@ -7,7 +7,12 @@ pub fn build(b: *std.Build) !void {
     const check_files_desc =
         \\Whether we do runtime checks for migration files that contains more than one statement, defaults to true
     ;
-    const check_files = b.option(bool, "zmig_check_files", check_files_desc) orelse true;
+    const check_files = b.option(bool, "check_files", check_files_desc) orelse true;
+
+    const emit_debug_desc =
+        \\Whether we emit debug messages for each migration file being applied, defaults to true
+    ;
+    const emit_debug = b.option(bool, "emit_debug", emit_debug_desc) orelse true;
 
     const migration_root_path_desc =
         \\The root path where all the migration SQL files are
@@ -36,6 +41,7 @@ pub fn build(b: *std.Build) !void {
 
     const options = b.addOptions();
     options.addOption(bool, "check_files", check_files);
+    options.addOption(bool, "emit_debug", emit_debug);
     options.addOption([]const []const u8, "migration_filenames", files.items);
     options.addOption([]const [:0]const u8, "migration_sqls", sqls.items);
 
