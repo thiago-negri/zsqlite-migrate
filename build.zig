@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) !void {
             const stat = try dir.statFile(file.name);
             const size = stat.size + 1; // +1 for sentinel
             const sql = try dir.readFileAllocOptions(b.allocator, file.name, size, size, @alignOf(u8), 0);
+            // TODO: Minify SQL
             try sqls.append(sql);
         }
     }

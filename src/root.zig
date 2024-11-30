@@ -71,6 +71,7 @@ fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
         if (opt_next_sql) |next_sql| {
             const next_sql_str = std.mem.span(next_sql);
             if (config.emit_debug) {
+                // TODO: Trim whitespace from next_sql_str
                 std.debug.print("SQLite Migrate: Executing:\n{s}\n\n", .{sql[0 .. sql.len - next_sql_str.len]});
             }
             if (next_sql_str.len != 0) {
@@ -78,7 +79,7 @@ fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
                 opt_next_sql = null;
             }
         } else {
-            std.debug.print("SQLite Migrate: Executing:z\n{s}\n\n", .{sql});
+            std.debug.print("SQLite Migrate: Executing:\n{s}\n\n", .{sql});
         }
 
         if (err != c.SQLITE_OK) {
