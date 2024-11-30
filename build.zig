@@ -4,11 +4,6 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const check_files_desc =
-        \\Whether we do runtime checks for migration files that contains more than one statement, defaults to true
-    ;
-    const check_files = b.option(bool, "check_files", check_files_desc) orelse true;
-
     const emit_debug_desc =
         \\Whether we emit debug messages for each migration file being applied, defaults to true
     ;
@@ -41,7 +36,6 @@ pub fn build(b: *std.Build) !void {
     }
 
     const options = b.addOptions();
-    options.addOption(bool, "check_files", check_files);
     options.addOption(bool, "emit_debug", emit_debug);
     options.addOption([]const []const u8, "migration_filenames", files.items);
     options.addOption([]const [:0]const u8, "migration_sqls", sqls.items);

@@ -41,11 +41,7 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
             if (config.emit_debug) {
                 std.debug.print("SQLite Migrate: Applying {s}...\n", .{filename_dir});
             }
-            if (config.check_files) {
-                try zMigrateApplyCheck(sqlite3, content);
-            } else {
-                try zMigrateApply(sqlite3, content);
-            }
+            try zMigrateApply(sqlite3, content);
 
             if (stmt_insert == null) {
                 stmt_insert = try zMigratePrepareInsert(sqlite3);
@@ -64,43 +60,32 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
 const Migration = struct { filename: []const u8, sql: [:0]const u8 };
 
 /// Apply a migration
-fn zMigrateApply(sqlite3: *c.sqlite3, sql: [:0]const u8) Error!void {
+fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
     var stmt: ?*c.sqlite3_stmt = null;
-    const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, null);
-    if (err != c.SQLITE_OK) {
-        if (stmt) |ptr| {
-            _ = c.sqlite3_finalize(ptr);
+    var current_sql: ?[]const u8 = initial_sql;
+    var opt_next_sql: [*c]const u8 = null;
+    while (current_sql) |sql| {
+        const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, &opt_next_sql);
+        if (err != c.SQLITE_OK) {
+            if (stmt) |ptr| {
+                _ = c.sqlite3_finalize(ptr);
+            }
+            return Error.Sqlite;
         }
-        return Error.Sqlite;
-    }
-    defer _ = c.sqlite3_finalize(stmt);
-    const step = c.sqlite3_step(stmt);
-    if (step != c.SQLITE_DONE) {
-        return Error.Sqlite;
-    }
-}
+        defer _ = c.sqlite3_finalize(stmt);
+        const step = c.sqlite3_step(stmt);
+        if (step != c.SQLITE_DONE) {
+            return Error.Sqlite;
+        }
 
-/// Apply a migration and check if it was a single statement
-fn zMigrateApplyCheck(sqlite3: *c.sqlite3, sql: [:0]const u8) Error!void {
-    var stmt: ?*c.sqlite3_stmt = null;
-    var tail: ?[*:0]const u8 = null;
-    const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, &tail);
-    if (err != c.SQLITE_OK) {
-        if (stmt) |ptr| {
-            _ = c.sqlite3_finalize(ptr);
+        current_sql = null;
+        if (opt_next_sql) |next_sql| {
+            const next_sql_str = std.mem.span(next_sql);
+            if (next_sql_str.len != 0) {
+                current_sql = next_sql_str;
+                opt_next_sql = null;
+            }
         }
-        return Error.Sqlite;
-    }
-    defer _ = c.sqlite3_finalize(stmt);
-    // Check whether that was a single statement or not
-    if (tail) |ptr| {
-        if (ptr[0] != 0) {
-            return Error.MigrationMustBeSingleStatement;
-        }
-    }
-    const step = c.sqlite3_step(stmt);
-    if (step != c.SQLITE_DONE) {
-        return Error.Sqlite;
     }
 }
 
@@ -265,6 +250,11 @@ test "test" {
         var name = c.sqlite3_column_text(stmt, 0);
         var size: usize = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "five", name[0..size]));
+        err = c.sqlite3_step(stmt);
+        try std.testing.expect(err == c.SQLITE_ROW);
+        name = c.sqlite3_column_text(stmt, 0);
+        size = @intCast(c.sqlite3_column_bytes(stmt, 0));
+        try std.testing.expect(std.mem.eql(u8, "five2", name[0..size]));
         err = c.sqlite3_step(stmt);
         try std.testing.expect(err == c.SQLITE_ROW);
         name = c.sqlite3_column_text(stmt, 0);
