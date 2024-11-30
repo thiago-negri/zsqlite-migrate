@@ -66,7 +66,27 @@ fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
     var opt_next_sql: [*c]const u8 = null;
     while (current_sql) |sql| {
         const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, &opt_next_sql);
+
+        current_sql = null;
+        if (opt_next_sql) |next_sql| {
+            const next_sql_str = std.mem.span(next_sql);
+            if (config.emit_debug) {
+                std.debug.print("SQLite Migrate: Executing:\n{s}\n\n", .{sql[0 .. sql.len - next_sql_str.len]});
+            }
+            if (next_sql_str.len != 0) {
+                current_sql = next_sql_str;
+                opt_next_sql = null;
+            }
+        } else {
+            std.debug.print("SQLite Migrate: Executing:z\n{s}\n\n", .{sql});
+        }
+
         if (err != c.SQLITE_OK) {
+            if (config.emit_debug) {
+                const sqlite_errcode = c.sqlite3_extended_errcode(sqlite3);
+                const sqlite_errmsg = c.sqlite3_errmsg(sqlite3);
+                std.debug.print("SQLite Migrate: ERROR {d}: {s}\n", .{ sqlite_errcode, sqlite_errmsg });
+            }
             if (stmt) |ptr| {
                 _ = c.sqlite3_finalize(ptr);
             }
@@ -75,16 +95,12 @@ fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
         defer _ = c.sqlite3_finalize(stmt);
         const step = c.sqlite3_step(stmt);
         if (step != c.SQLITE_DONE) {
-            return Error.Sqlite;
-        }
-
-        current_sql = null;
-        if (opt_next_sql) |next_sql| {
-            const next_sql_str = std.mem.span(next_sql);
-            if (next_sql_str.len != 0) {
-                current_sql = next_sql_str;
-                opt_next_sql = null;
+            if (config.emit_debug) {
+                const sqlite_errcode = c.sqlite3_extended_errcode(sqlite3);
+                const sqlite_errmsg = c.sqlite3_errmsg(sqlite3);
+                std.debug.print("SQLite Migrate: ERROR {d}: {s}\n", .{ sqlite_errcode, sqlite_errmsg });
             }
+            return Error.Sqlite;
         }
     }
 }
