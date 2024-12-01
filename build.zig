@@ -88,7 +88,7 @@ fn minifySql(alloc: std.mem.Allocator, sql: [:0]const u8) ![:0]const u8 {
         switch (mode) {
             .identifier => {
                 switch (char) {
-                    '0'...'9', 'A'...'Z', 'a'...'z', '_', ')', '(', ',', ';' => {
+                    '0'...'9', 'A'...'Z', 'a'...'z', '_', ')', '(', ',', ';', '=' => {
                         // ignore
                     },
                     else => {
@@ -169,7 +169,7 @@ fn minifySql(alloc: std.mem.Allocator, sql: [:0]const u8) ![:0]const u8 {
         if (total_length > 0) {
             const first_char = item[0];
             switch (first_char) {
-                ')', '(', ',', ';' => {
+                ')', '(', ',', ';', '=' => {
                     // ignore
                 },
                 else => {
@@ -184,7 +184,7 @@ fn minifySql(alloc: std.mem.Allocator, sql: [:0]const u8) ![:0]const u8 {
 
         const last_char = item[item.len - 1];
         switch (last_char) {
-            ')', '(', ',', ';' => {
+            ')', '(', ',', ';', '=' => {
                 require_space_after = false;
             },
             else => {
@@ -204,7 +204,7 @@ fn minifySql(alloc: std.mem.Allocator, sql: [:0]const u8) ![:0]const u8 {
         if (total_length > 0) {
             const first_char = item[0];
             switch (first_char) {
-                ')', '(', ',', ';' => {
+                ')', '(', ',', ';', '=' => {
                     // ignore
                 },
                 else => {
@@ -221,7 +221,7 @@ fn minifySql(alloc: std.mem.Allocator, sql: [:0]const u8) ![:0]const u8 {
 
         const last_char = item[item.len - 1];
         switch (last_char) {
-            ')', '(', ',', ';' => {
+            ')', '(', ',', ';', '=' => {
                 require_space_after = false;
             },
             else => {
