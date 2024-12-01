@@ -4,8 +4,10 @@ const c = @cImport({
 });
 const config = @import("config");
 
+const MigrateOptions = struct { emit_debug: bool };
+
 /// Apply migrations
-pub fn migrate(sqlite3: *c.sqlite3) !void {
+pub fn migrate(sqlite3: *c.sqlite3, opts: MigrateOptions) !void {
     var stmt_read: ?*c.sqlite3_stmt = null;
     defer if (stmt_read) |ptr| {
         _ = c.sqlite3_finalize(ptr);
@@ -38,10 +40,10 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
         // applied yet, so apply it.
         if (ord == .lt) {
             const content = config.migration_sqls[migration_index];
-            if (config.emit_debug) {
+            if (opts.emit_debug) {
                 std.debug.print("SQLite Migrate: Applying {s}...\n", .{filename_dir});
             }
-            try zMigrateApply(sqlite3, content);
+            try zMigrateApply(sqlite3, opts, content);
 
             if (stmt_insert == null) {
                 stmt_insert = try zMigratePrepareInsert(sqlite3);
@@ -60,7 +62,7 @@ pub fn migrate(sqlite3: *c.sqlite3) !void {
 const Migration = struct { filename: []const u8, sql: [:0]const u8 };
 
 /// Apply a migration
-fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
+fn zMigrateApply(sqlite3: *c.sqlite3, opts: MigrateOptions, initial_sql: [:0]const u8) Error!void {
     var stmt: ?*c.sqlite3_stmt = null;
     var current_sql: ?[]const u8 = initial_sql;
     var opt_next_sql: [*c]const u8 = null;
@@ -70,20 +72,21 @@ fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
         current_sql = null;
         if (opt_next_sql) |next_sql| {
             const next_sql_str = std.mem.span(next_sql);
-            if (config.emit_debug) {
-                // TODO: Trim whitespace from next_sql_str
-                std.debug.print("SQLite Migrate: Executing:\n{s}\n\n", .{sql[0 .. sql.len - next_sql_str.len]});
+            const next_len = next_sql_str.len;
+            if (opts.emit_debug) {
+                const sql_len = sql.len - if (next_len > 0) next_len + 1 else 0;
+                std.debug.print("SQLite Migrate:     {s}\n", .{sql[0..sql_len]});
             }
             if (next_sql_str.len != 0) {
                 current_sql = next_sql_str;
                 opt_next_sql = null;
             }
         } else {
-            std.debug.print("SQLite Migrate: Executing:\n{s}\n\n", .{sql});
+            std.debug.print("SQLite Migrate:     {s}\n", .{sql});
         }
 
         if (err != c.SQLITE_OK) {
-            if (config.emit_debug) {
+            if (opts.emit_debug) {
                 const sqlite_errcode = c.sqlite3_extended_errcode(sqlite3);
                 const sqlite_errmsg = c.sqlite3_errmsg(sqlite3);
                 std.debug.print("SQLite Migrate: ERROR {d}: {s}\n", .{ sqlite_errcode, sqlite_errmsg });
@@ -96,7 +99,7 @@ fn zMigrateApply(sqlite3: *c.sqlite3, initial_sql: [:0]const u8) Error!void {
         defer _ = c.sqlite3_finalize(stmt);
         const step = c.sqlite3_step(stmt);
         if (step != c.SQLITE_DONE) {
-            if (config.emit_debug) {
+            if (opts.emit_debug) {
                 const sqlite_errcode = c.sqlite3_extended_errcode(sqlite3);
                 const sqlite_errmsg = c.sqlite3_errmsg(sqlite3);
                 std.debug.print("SQLite Migrate: ERROR {d}: {s}\n", .{ sqlite_errcode, sqlite_errmsg });
@@ -242,7 +245,7 @@ test "test" {
         _ = c.sqlite3_close(ptr);
     };
     var err = c.sqlite3_open(":memory:", &sqlite3);
-    try std.testing.expect(err == c.SQLITE_OK);
+    try std.testing.expectEqual(c.SQLITE_OK, err);
     try zMigrateTableCreate(sqlite3.?);
     {
         const stmt: *c.sqlite3_stmt = try zMigratePrepareInsert(sqlite3.?);
@@ -253,47 +256,47 @@ test "test" {
         _ = c.sqlite3_reset(stmt);
         try zMigrateInsert(stmt, "7_seven.sql");
     }
-    try migrate(sqlite3.?);
+    try migrate(sqlite3.?, .{ .emit_debug = true });
     {
         const sql: [:0]const u8 =
             \\SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name
         ;
         var stmt: ?*c.sqlite3_stmt = null;
         err = c.sqlite3_prepare_v2(sqlite3, sql, @intCast(sql.len + 1), &stmt, null);
-        try std.testing.expect(err == c.SQLITE_OK);
+        try std.testing.expectEqual(c.SQLITE_OK, err);
         defer _ = c.sqlite3_finalize(stmt);
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         var name = c.sqlite3_column_text(stmt, 0);
         var size: usize = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "five", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "five2", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "four", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "six", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "two", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "z_migrate", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_DONE);
+        try std.testing.expectEqual(c.SQLITE_DONE, err);
     }
     {
         const sql: [:0]const u8 =
@@ -301,44 +304,44 @@ test "test" {
         ;
         var stmt: ?*c.sqlite3_stmt = null;
         err = c.sqlite3_prepare_v2(sqlite3, sql, @intCast(sql.len + 1), &stmt, null);
-        try std.testing.expect(err == c.SQLITE_OK);
+        try std.testing.expectEqual(c.SQLITE_OK, err);
         defer _ = c.sqlite3_finalize(stmt);
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         var name = c.sqlite3_column_text(stmt, 0);
         var size: usize = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "1_one.sql", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "2_two.sql", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "3_three.sql", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "4_four.sql", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "5_five.sql", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "6_six.sql", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_ROW);
+        try std.testing.expectEqual(c.SQLITE_ROW, err);
         name = c.sqlite3_column_text(stmt, 0);
         size = @intCast(c.sqlite3_column_bytes(stmt, 0));
         try std.testing.expect(std.mem.eql(u8, "7_seven.sql", name[0..size]));
         err = c.sqlite3_step(stmt);
-        try std.testing.expect(err == c.SQLITE_DONE);
+        try std.testing.expectEqual(c.SQLITE_DONE, err);
     }
 }
