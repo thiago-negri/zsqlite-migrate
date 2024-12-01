@@ -169,6 +169,8 @@ fn minifySql(alloc: std.mem.Allocator, sql: [:0]const u8) ![:0]const u8 {
         if (total_length > 0) {
             const first_char = item[0];
             switch (first_char) {
+                // Would be awesome to extract that list into a comptime const,
+                // monitor https://github.com/ziglang/zig/issues/21507
                 ')', '(', ',', ';', '=' => {
                     // ignore
                 },
