@@ -29,7 +29,7 @@
         },
         .@"zsqlite-minify" = .{
             .url = "https://github.com/thiago-negri/zsqlite-minify/archive/refs/heads/master.zip",
-            .hash = "122091a58191fcafef8b0e780c32d8c3a4704266bb8d3a1457a71ef74773044e0a73",
+            .hash = "12201cf406d4744a79d9642cf124870d89d4a0ccce259a19bda88b78586db63410b5",
         },
     },
     .paths = .{
