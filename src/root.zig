@@ -4,10 +4,12 @@ const c = @cImport({
 });
 const config = @import("config");
 
-const MigrateOptions = struct { emit_debug: bool };
+pub const MigrateOptions = struct { emit_debug: bool };
+
+pub const MigrateError = error{Sqlite};
 
 /// Apply migrations
-pub fn migrate(sqlite3: *c.sqlite3, opts: MigrateOptions) !void {
+pub fn migrate(sqlite3: *c.sqlite3, opts: MigrateOptions) MigrateError!void {
     var stmt_read: ?*c.sqlite3_stmt = null;
     defer if (stmt_read) |ptr| {
         _ = c.sqlite3_finalize(ptr);
@@ -50,7 +52,7 @@ pub fn migrate(sqlite3: *c.sqlite3, opts: MigrateOptions) !void {
             } else {
                 const err = c.sqlite3_reset(stmt_insert);
                 if (err != c.SQLITE_OK) {
-                    return Error.Sqlite;
+                    return MigrateError.Sqlite;
                 }
             }
 
@@ -62,7 +64,7 @@ pub fn migrate(sqlite3: *c.sqlite3, opts: MigrateOptions) !void {
 const Migration = struct { filename: []const u8, sql: [:0]const u8 };
 
 /// Apply a migration
-fn zMigrateApply(sqlite3: *c.sqlite3, opts: MigrateOptions, initial_sql: [:0]const u8) Error!void {
+fn zMigrateApply(sqlite3: *c.sqlite3, opts: MigrateOptions, initial_sql: [:0]const u8) MigrateError!void {
     var stmt: ?*c.sqlite3_stmt = null;
     var current_sql: ?[]const u8 = initial_sql;
     var opt_next_sql: [*c]const u8 = null;
@@ -87,47 +89,47 @@ fn zMigrateApply(sqlite3: *c.sqlite3, opts: MigrateOptions, initial_sql: [:0]con
 
         if (err != c.SQLITE_OK) {
             if (opts.emit_debug) {
-                const sqlite_errcode = c.sqlite3_extended_errcode(sqlite3);
-                const sqlite_errmsg = c.sqlite3_errmsg(sqlite3);
-                std.debug.print("SQLite Migrate: ERROR {d}: {s}\n", .{ sqlite_errcode, sqlite_errmsg });
+                emitDebugError(sqlite3);
             }
             if (stmt) |ptr| {
                 _ = c.sqlite3_finalize(ptr);
             }
-            return Error.Sqlite;
+            return MigrateError.Sqlite;
         }
         defer _ = c.sqlite3_finalize(stmt);
         const step = c.sqlite3_step(stmt);
         if (step != c.SQLITE_DONE) {
             if (opts.emit_debug) {
-                const sqlite_errcode = c.sqlite3_extended_errcode(sqlite3);
-                const sqlite_errmsg = c.sqlite3_errmsg(sqlite3);
-                std.debug.print("SQLite Migrate: ERROR {d}: {s}\n", .{ sqlite_errcode, sqlite_errmsg });
+                emitDebugError(sqlite3);
             }
-            return Error.Sqlite;
+            return MigrateError.Sqlite;
         }
     }
 }
 
-fn zMigratePrepareRead(sqlite3: *c.sqlite3) Error!*c.sqlite3_stmt {
+fn emitDebugError(sqlite3: *c.sqlite3) void {
+    const sqlite_errcode = c.sqlite3_extended_errcode(sqlite3);
+    const sqlite_errmsg = c.sqlite3_errmsg(sqlite3);
+    std.debug.print("SQLite Migrate: ERROR {d}: {s}\n", .{ sqlite_errcode, sqlite_errmsg });
+}
+
+fn zMigratePrepareRead(sqlite3: *c.sqlite3) MigrateError!*c.sqlite3_stmt {
     var stmt: ?*c.sqlite3_stmt = null;
     errdefer if (stmt) |ptr| {
         _ = c.sqlite3_finalize(ptr);
     };
-    const sql: [:0]const u8 =
-        \\SELECT filename FROM z_migrate ORDER BY filename
-    ;
+    const sql: [:0]const u8 = "SELECT filename FROM z_migrate ORDER BY filename";
     const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, null);
     if (err != c.SQLITE_OK) {
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
     if (stmt) |ptr| {
         return ptr;
     }
-    return Error.Sqlite;
+    return MigrateError.Sqlite;
 }
 
-fn zMigrateStep(stmt: *c.sqlite3_stmt) Error!?[]const u8 {
+fn zMigrateStep(stmt: *c.sqlite3_stmt) MigrateError!?[]const u8 {
     const step = c.sqlite3_step(stmt);
     switch (step) {
         c.SQLITE_DONE => {
@@ -139,7 +141,7 @@ fn zMigrateStep(stmt: *c.sqlite3_stmt) Error!?[]const u8 {
             return data_ptr[0..size];
         },
         else => {
-            return Error.Sqlite;
+            return MigrateError.Sqlite;
         },
     }
 }
@@ -152,53 +154,47 @@ fn order(dir: []const u8, opt_sql: ?[]const u8) std.math.Order {
     }
 }
 
-fn zMigratePrepareInsert(sqlite3: *c.sqlite3) Error!*c.sqlite3_stmt {
-    const sql: [:0]const u8 =
-        \\INSERT INTO z_migrate(filename,applied_at)VALUES(?,?)
-    ;
+fn zMigratePrepareInsert(sqlite3: *c.sqlite3) MigrateError!*c.sqlite3_stmt {
+    const sql: [:0]const u8 = "INSERT INTO z_migrate(filename,applied_at)VALUES(?,?)";
     var stmt: ?*c.sqlite3_stmt = null;
     const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, null);
     if (err != c.SQLITE_OK) {
         if (stmt) |ptr| {
             _ = c.sqlite3_finalize(ptr);
         }
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
     if (stmt) |ptr| {
         return ptr;
     }
-    return Error.Sqlite;
+    return MigrateError.Sqlite;
 }
 
-fn zMigrateInsert(stmt: *c.sqlite3_stmt, filename_dir: []const u8) Error!void {
+fn zMigrateInsert(stmt: *c.sqlite3_stmt, filename_dir: []const u8) MigrateError!void {
     var err = c.sqlite3_bind_text(stmt, 1, filename_dir.ptr, @intCast(filename_dir.len), c.SQLITE_STATIC);
     if (err != c.SQLITE_OK) {
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
     const now = std.time.timestamp();
     err = c.sqlite3_bind_int64(stmt, 2, now);
     if (err != c.SQLITE_OK) {
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
     const step = c.sqlite3_step(stmt);
     if (step != c.SQLITE_DONE) {
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
 }
 
-pub const Error = error{ Sqlite, MigrationMustBeSingleStatement };
-
-fn zMigrateTableExists(sqlite3: *c.sqlite3) Error!bool {
-    const sql: [:0]const u8 =
-        \\SELECT 1 FROM sqlite_schema WHERE type='table' AND name='z_migrate'
-    ;
+fn zMigrateTableExists(sqlite3: *c.sqlite3) MigrateError!bool {
+    const sql: [:0]const u8 = "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='z_migrate'";
     var stmt: ?*c.sqlite3_stmt = null;
     const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, null);
     if (err != c.SQLITE_OK) {
         if (stmt) |ptr| {
             _ = c.sqlite3_finalize(ptr);
         }
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
     defer _ = c.sqlite3_finalize(stmt);
     const step = c.sqlite3_step(stmt);
@@ -210,27 +206,25 @@ fn zMigrateTableExists(sqlite3: *c.sqlite3) Error!bool {
             return true;
         },
         else => {
-            return Error.Sqlite;
+            return MigrateError.Sqlite;
         },
     }
 }
 
-fn zMigrateTableCreate(sqlite3: *c.sqlite3) Error!void {
-    const sql: [:0]const u8 =
-        \\CREATE TABLE z_migrate(filename TEXT,applied_at INTEGER)
-    ;
+fn zMigrateTableCreate(sqlite3: *c.sqlite3) MigrateError!void {
+    const sql: [:0]const u8 = "CREATE TABLE z_migrate(filename TEXT,applied_at INT)";
     var stmt: ?*c.sqlite3_stmt = null;
     const err = c.sqlite3_prepare_v2(sqlite3, sql.ptr, @intCast(sql.len + 1), &stmt, null);
     if (err != c.SQLITE_OK) {
         if (stmt) |ptr| {
             _ = c.sqlite3_finalize(ptr);
         }
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
     defer _ = c.sqlite3_finalize(stmt);
     const step = c.sqlite3_step(stmt);
     if (step != c.SQLITE_DONE) {
-        return Error.Sqlite;
+        return MigrateError.Sqlite;
     }
 }
 
